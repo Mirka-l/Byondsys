@@ -44,6 +44,9 @@ fn copy_wrapper(lib_dir: &Path) -> PathBuf {
 fn generate_all() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not defined"));
 
+    let target_triple = std::env::var("TARGET").unwrap_or("".into());
+    let is_64_bit = target_triple.starts_with("aarch64");
+
     get_headers()
         .into_iter()
         .for_each(|(path, (major, minor))| {
@@ -51,7 +54,7 @@ fn generate_all() {
             std::fs::copy(path, target).expect("Failed to copy to out_dir");
             let wrapper = copy_wrapper(&out_dir);
 
-            let builder = bindgen::Builder::default()
+            let mut builder = bindgen::Builder::default()
                 .header(wrapper.to_string_lossy())
                 .dynamic_library_name("ByondApi")
                 .dynamic_link_require_all(true)
@@ -59,6 +62,10 @@ fn generate_all() {
                 // Also make headers included by main header dependencies of the build
                 .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
                 .parse_callbacks(Box::new(DoxygenCallbacks));
+
+            if is_64_bit {
+                builder = builder.clang_arg("-DDM_64BIT")
+            }
 
             builder
                 .generate()
