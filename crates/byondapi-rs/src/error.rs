@@ -1,5 +1,7 @@
 //! Error types for any problems this runs into, including internal BYOND errors.
-use std::ffi::{CStr, CString};
+#[cfg(not(feature = "byond-516-1682"))]
+use std::ffi::CStr;
+use std::ffi::CString;
 
 use crate::{prelude::ByondValue, static_global::byond};
 
@@ -77,16 +79,54 @@ impl std::error::Error for Error {}
 pub struct ByondError(pub CString);
 
 impl ByondError {
+    #[cfg(not(feature = "byond-516-1682"))]
     pub fn get_last() -> Option<Self> {
-        // Safety: It's always safe to call Byond_LastError
+        // Safety: It's always safe to call Byond_LastError.
         let ptr = unsafe { byond().Byond_LastError() };
         if !ptr.is_null() {
-            // Safety: We just have to trust that Byond gave us a valid cstring...
+            // Safety: We have to trust that BYOND gave us a valid C string.
             let cstr = unsafe { CStr::from_ptr(ptr) };
             Some(ByondError(cstr.to_owned()))
         } else {
             None
         }
+    }
+
+    #[cfg(feature = "byond-516-1682")]
+    pub fn get_last() -> Option<Self> {
+        use std::cell::RefCell;
+
+        thread_local! {
+            static BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(1));
+        }
+
+        let bytes = BUFFER.with_borrow_mut(|buff| -> Option<Vec<u8>> {
+            let mut len = buff.capacity() as u32;
+            let initial_res =
+                unsafe { byond().Byond_LastError(buff.as_mut_ptr().cast(), &mut len) };
+            match (initial_res, len) {
+                (false, 1..) => {
+                    buff.reserve_exact(len as usize);
+                    if unsafe { byond().Byond_LastError(buff.as_mut_ptr().cast(), &mut len) } {
+
+                        unsafe { buff.set_len(len as usize) };
+                        Some(std::mem::take(buff))
+                    } else {
+                        None
+                    }
+                }
+                (true, _) => {
+                    unsafe { buff.set_len(len as usize) };
+                    Some(std::mem::take(buff))
+                }
+                (false, 0) => None,
+            }
+        })?;
+
+        CString::from_vec_with_nul(bytes)
+            .ok()
+            .filter(|err| !err.as_bytes().is_empty())
+            .map(ByondError)
     }
 }
 
