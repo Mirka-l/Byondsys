@@ -23,7 +23,7 @@ fn init_lib() -> byondapi_sys::ByondApi {
         .expect("Failed to initialize library.")
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn init_lib() -> byondapi_sys::ByondApi {
     for func in inventory::iter::<super::InitFunc> {
         func.0();
